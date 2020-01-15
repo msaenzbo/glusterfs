@@ -1,0 +1,337 @@
+Kubernetes config :
+
+ https://oracle.github.io/linux-labs/OLCNE-Gluster/
+ 
+ Se siguen los pasos dado en la pagina de arriba.
+ 
+
+ Mi problema fue que yo estoy usando un cluster de 2 worker nodes... y glusterfs pide 3 como minimo...
+ 
+ por ende me daba ese error al crear los PV.
+ 
+
+
+==========
+MASTER1
+===========
+
+[root@maurisae-master1 heketi]# kubectl get nodes
+NAME               STATUS   ROLES    AGE   VERSION
+maurisae-master1   Ready    master   20h   v1.14.8+1.0.2.el7
+maurisae-master2   Ready    master   20h   v1.14.8+1.0.2.el7
+maurisae-master3   Ready    master   20h   v1.14.8+1.0.2.el7
+maurisae-worker1   Ready    <none>   20h v1.14.8+1.0.2.el7
+maurisae-worker2   Ready    <none>   20h v1.14.8+1.0.2.el7
+
+
+Cluster created :
+
+ [root@maurisae-master1 heketi]# heketi-cli --user admin --secret "oracle2020" node list
+Id:403707cd06434e7855fc8cf024d261ec Cluster:1e153872eccbe51fd71d5f679e86ce1e
+Id:7d33c4ceec4245f927d480747b8acf3c Cluster:1e153872eccbe51fd71d5f679e86ce1e
+
+
+
+[root@maurisae-master1 heketi]# curl localhost:8080/hello
+Hello from Heketi
+
+[root@maurisae-master1 heketi]# curl http://maurisae-master1:8080/hello
+Hello from Heketi
+
+
+Storage Class created :
+
+[root@maurisae-master1 heketi]# kubectl get storageclasses.storage.k8s.io
+NAME                       PROVISIONER                  AGE
+glusterfsclass (default)   kubernetes.io/glusterfs      5s
+rook-ceph-block            rook-ceph.rbd.csi.ceph.com   18h
+[root@maurisae-master1 heketi]#
+
+
+
+[root@maurisa glusterFSe-master1 heketi]# cat StorageClass_glusterfs.yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: glusterfsclass
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: kubernetes.io/glusterfs
+parameters:
+  resturl: "http://maurisae-master1:8080"
+  restauthenabled: "true"
+  restuser: "admin"
+  secretNamespace: "default"
+  secretName: "heketi-admin"
+
+
+Tried to provision a PVC:
+
+root@maurisae-master1 heketi]# kubectl describe pvc gluster-pvc-1
+Name:          gluster-pvc-1
+Namespace:     default
+StorageClass:  glusterfsclass
+Status:        Pending
+Volume:
+Labels:        <none>
+Annotations:   volume.beta.kubernetes.io/storage-provisioner: kubernetes.io/glusterfs
+Finalizers:    [kubernetes.io/pvc-protection]
+Capacity:
+Access Modes:
+VolumeMode:    Filesystem
+Events:
+  Type       Reason              Age From Message
+  ----       ------              ---- ---- -------
+  Warning    ProvisioningFailed  6s (x2 over 15s) persistentvolume-controller  Failed to provision volume with StorageClass "glusterfsclass": failed to create volume: failed to create volume: Failed to allocate new volume: No space
+Mounted By:  <none>
+
+
+
+
+[root@maurisae-heketi-cli --user admin --secret "oracle2020" volume list
+[root@maurisae-master1 heketi]#
+
+
+
+=============
+WORKER 1
+=============
+
+[root@maurisae-worker1 ~]# curl http://maurisae-master1:8080/hello
+Hello from Heketi
+
+
+[root@maurisae-worker1 ~]# lsblk
+NAME MAJ:MIN RM  SIZE RO TYPE MOUNTPOINT
+sdb 8:16   0  500G  0 disk
+└─ceph--cb731cb1--6868--4d7c--b268--fa2333b5315d-osd--data--1b3fd74d--9820--4fe6--88f4--891aeb64a6e2 252:0    0  499G  0 lvm
+sdc 8:32   0    1T  0 disk   <==== gluserFS
+sda 8:0    0  100G  0 disk
+├─sda2 8:2    0    8G  0 part
+├─sda3 8:3    0 91.8G  0 part /
+└─sda1 8:1    0  200M  0 part /boot/e
+
+
+[root@maurisae-worker1 ~]# blkid
+/dev/sda3: UUID="e5a0d6d8-6141-4c6d-a2f7-ebe65eb7513a" TYPE="xfs" PARTUUID="e26e41e4-bbed-4eeb-b175-b72a6935e8f3"
+/dev/sda1: SEC_TYPE="msdos" UUID="A2CF-0CCB" TYPE="vfat" PARTLABEL="EFI System Partition" PARTUUID="25547e4a-3a6b-446e-abac-47caf6dc078a"
+/dev/sda2: UUID="ffa35d76-0947-49fe-b030-3bf270640b7a" TYPE="swap" PARTUUID="8b91c8fb-ba55-4a73-8e62-b1f880d56d9b"
+/dev/sdb: UUID="Qn0dJ7-2IoU-dGLh-6Ezt-0Ut3-lyMP-vYf116" TYPE="LVM2_member"
+/dev/sdc: UUID="ZLvJpO-3uAe-CQ9m-41cQ-nhrd-kquI-tn91uM" TYPE="LVM2_member   <=====  glusterfs
+
+
+
+=============
+WORKER 2
+=============
+
+[root@maurisae-worker2 ~]#  curl http://maurisae-master1:8080/hello
+Hello from Heketi[
+
+
+[root@maurisae-worker2 ~]# lsblk
+NAME MAJ:MIN RM  SIZE RO TYPE MOUNTPOINT
+sdb 8:16   0  500G  0 disk
+└─ceph--0563aa82--91b4--44a1--8e22--b4da5a279d32-osd--data--09f8b72e--84c5--48bc--9d71--a59b9cb8de79 252:0    0  499G  0 lvm
+rbd1 251:16   0    1G  0 disk /mnt
+sdc 8:32   0    1T  0 disk
+sda 8:0    0  100G  0 disk
+├─sda2 8:2    0    8G  0 part
+├─sda3 8:3    0 91.8G  0 part /
+└─sda1 8:1    0  200M  0 part /boot/efi
+[root@maurisae-worker2 ~]#
+[root@maurisae-worker2 ~]# blkid
+/dev/sda3: UUID="e5a0d6d8-6141-4c6d-a2f7-ebe65eb7513a" TYPE="xfs" PARTUUID="e26e41e4-bbed-4eeb-b175-b72a6935e8f3"
+/dev/sda1: SEC_TYPE="msdos" UUID="A2CF-0CCB" TYPE="vfat" PARTLABEL="EFI System Partition" PARTUUID="25547e4a-3a6b-446e-abac-47caf6dc078a"
+/dev/sda2: UUID="ffa35d76-0947-49fe-b030-3bf270640b7a" TYPE="swap" PARTUUID="8b91c8fb-ba55-4a73-8e62-b1f880d56d9b"
+/dev/sdb: UUID="OQHU4X-laeA-VDzR-eYFD-yFfk-CMPN-g7Av1W" TYPE="LVM2_member"
+/dev/rbd1: UUID="2f4d90db-0e23-4b6d-8934-0b4c769c2d21" TYPE="xfs"
+/dev/sdc: UUID="HgYc29-JF0a
+
+
+
+Solution es :
+ 
+ add --replica=2 on the end of the heketi-cli volume create
+ 
+And you'll need the StorageClass to include:
+parameters:
+  volumetype: "replicate:2"
+  
+Crear el pvc ahora:
+
+
+root@maurisae-master1 ~]# kubectl create -f /etc/heketi/pvc.yaml
+persistentvolumeclaim/gluster-pvc-1 created
+[root@maurisae-master1 ~]# 
+[root@maurisae-master1 ~]# kubectl get pvc
+NAME            STATUS    VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS      AGE
+gluster-pvc-1   Pending                                                                        glusterfsclass    5s
+pv-claim-rook   Bound     pvc-eb3d561f-3732-11ea-b8a5-02001705983c   1Gi        RWO            rook-ceph-block   21h
+[root@maurisae-master1 ~]# 
+[root@maurisae-master1 ~]# kubectl get pvc
+NAME            STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS      AGE
+gluster-pvc-1   Bound    pvc-0f8c71e7-37e3-11ea-b8a5-02001705983c   1Gi        RWX            glusterfsclass    7s
+pv-claim-rook   Bound    pvc-eb3d561f-3732-11ea-b8a5-02001705983c   1Gi        RWO            rook-ceph-block   21h
+[root@maurisae-master1 ~]# 
+[root@maurisae-master1 ~]# heketi-cli --user admin --secret "oracle2020" volume list
+Id:45caacc83b427fca13fcbc3942737651    Cluster:1e153872eccbe51fd71d5f679e86ce1e    Name:vol_45caacc83b427fca13fcbc3942737651
+[root@maurisae-master1 ~]# 
+
+
+
+
+[root@maurisae-master1 ~]# cat /etc/heketi/StorageClass_glusterfs.yaml 
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: glusterfsclass
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: kubernetes.io/glusterfs
+parameters:
+  volumetype: "replicate:2"
+  resturl: "http://maurisae-master1:8080"
+  restauthenabled: "true"
+  restuser: "admin"
+  secretNamespace: "default"
+  secretName: "heketi-admin"
+
+
+
+
+[root@maurisae-master1 ~]#  cat /etc/heketi/heketi.json
+{
+  "_port_comment": "Heketi Server Port Number",
+  "port": "8080",
+
+  "_use_auth": "Enable JWT authorization. Please enable for deployment",
+  "use_auth": true,
+
+  "_jwt": "Private keys for access",
+  "jwt": {
+    "_admin": "Admin has access to all APIs",
+    "admin": {
+      "key": "oracle2020"
+    },
+    "_user": "User only has access to /volumes endpoint",
+    "user": {
+      "key": "support2020"
+    }
+  },
+
+  "_glusterfs_comment": "GlusterFS Configuration",
+  "glusterfs": {
+    "_executor_comment": [
+      "Execute plugin. Possible choices: mock, ssh",
+      "mock: This setting is used for testing and development.",
+      "      It will not send commands to any node.",
+      "ssh:  This setting will notify Heketi to ssh to the nodes.",
+      "      It will need the values in sshexec to be configured.",
+      "kubernetes: Communicate with GlusterFS containers over",
+      "            Kubernetes exec api."
+    ],
+    "executor": "ssh",
+
+    "_sshexec_comment": "SSH username and private key file information",
+    "sshexec": {
+      "keyfile": "/etc/heketi/heketi_key",
+      "user": "root",
+      "port": "22",
+      "fstab": "/etc/fstab"
+    },
+
+    "_kubeexec_comment": "Kubernetes configuration",
+    "kubeexec": {
+      "host" :"https://kubernetes.host:8443",
+      "cert" : "/path/to/crt.file",
+      "insecure": false,
+      "user": "kubernetes username",
+      "password": "password for kubernetes user",
+      "namespace": "OpenShift project or Kubernetes namespace",
+      "fstab": "Optional: Specify fstab file on node.  Default is /etc/fstab"
+    },
+
+    "_db_comment": "Database file name",
+    "db": "/var/lib/heketi/heketi.db",
+
+    "_loglevel_comment": [
+      "Set log level. Choices are:",
+      "  none, critical, error, warning, info, debug",
+      "Default is warning"
+    ],
+    "loglevel" : "debug"
+  }
+}
+
+
+
+
+
+[root@maurisae-master1 ~]#  cat /etc/heketi/topology.json 
+{
+  "clusters": [
+    {
+      "nodes": [
+        {
+          "node": {
+            "hostnames": {
+              "manage": [
+                "maurisae-worker1"
+              ],
+              "storage": [
+                "100.104.240.57"
+              ]
+            },
+            "zone": 1
+          },
+          "devices": [
+            "/dev/sdc"
+          ]
+        },
+        {
+          "node": {
+            "hostnames": {
+              "manage": [
+                "maurisae-worker2"
+              ],
+              "storage": [
+                "100.104.240.59"
+              ]
+            },
+            "zone": 1
+          },
+          "devices": [
+            "/dev/sdc"
+          ]
+        }
+      ]
+    }
+  ]
+}
+
+
+
+
+[root@maurisae-master1 ~]# 
+[root@maurisae-master1 ~]# cat /etc/heketi/pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+ name: gluster-pvc-1
+spec:
+ accessModes:
+  - ReadWriteMany
+ resources:
+  requests:
+    storage: 1Gi
+
+
+
+
+
+
+
+
+Regards,
+Mauricio S. 
